@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#062a2d">
+<title>Arduino UNO en 3D y AR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --fondo-1: #0f4a4d;
+    --fondo-2: #062a2d;
+    --fondo-3: #03171a;
+    --texto: #e9f3f1;
+    --texto-suave: #9fc2bd;
+    --oro: #e9b949;
+    --oro-texto: #1a1403;
+    --vidrio: rgba(3, 23, 26, 0.55);
+    --borde: rgba(233, 243, 241, 0.28);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  body {
+    font-family: "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--texto);
+    background: radial-gradient(120% 90% at 50% 35%, var(--fondo-1) 0%, var(--fondo-2) 55%, var(--fondo-3) 100%);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  [hidden] { display: none !important; }
+
+  #cam {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: none;
+    z-index: 0;
+  }
+
+  #gl {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    z-index: 1;
+  }
+
+  #ui {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  }
+
+  #gestos {
+    position: absolute;
+    inset: 0;
+    pointer-events: auto;
+    touch-action: none;
+  }
+
+  #cabecera {
+    position: absolute;
+    top: 18px;
+    left: 20px;
+    right: 120px;
+    pointer-events: none;
+  }
+
+  #cabecera h1 {
+    margin: 0 0 6px;
+    font-size: 1.45rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  #cabecera p {
+    margin: 0;
+    max-width: 30ch;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    color: var(--texto-suave);
+  }
+
+  .boton {
+    pointer-events: auto;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    border-radius: 999px;
+    padding: 14px 26px;
+    font-size: 1rem;
+    border: 1px solid transparent;
+    touch-action: manipulation;
+  }
+
+  .boton:focus-visible {
+    outline: 3px solid var(--texto);
+    outline-offset: 3px;
+  }
+
+  .boton:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .principal {
+    background: var(--oro);
+    color: var(--oro-texto);
+    padding: 16px 34px;
+    font-size: 1.05rem;
+  }
+
+  .secundario {
+    background: var(--vidrio);
+    color: var(--texto);
+    border-color: var(--borde);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    padding: 11px 20px;
+    font-size: 0.9rem;
+  }
+
+  #restablecer {
+    position: absolute;
+    top: 18px;
+    right: 20px;
+  }
+
+  #salir {
+    position: absolute;
+    top: 18px;
+    right: 20px;
+  }
+
+  #acciones {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 26px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    pointer-events: none;
+  }
+
+  #aviso {
+    position: absolute;
+    left: 50%;
+    bottom: 120px;
+    transform: translateX(-50%);
+    max-width: min(88vw, 34ch);
+    padding: 12px 18px;
+    border-radius: 14px;
+    background: var(--vidrio);
+    border: 1px solid var(--borde);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    font-size: 0.92rem;
+    line-height: 1.4;
+    text-align: center;
+    pointer-events: none;
+  }
+
+  #aviso.error {
+    border-color: var(--oro);
+  }
+
+  body[data-modo="visor"] .solo-ar { display: none; }
+  body[data-modo="ar"] .solo-visor,
+  body[data-modo="xr"] .solo-visor { display: none; }
+  body[data-modo="ar"] #cam { display: block; }
+  body[data-modo="ar"],
+  body[data-modo="xr"] { background: transparent; }
+  body[data-modo="ar"] #cabecera h1,
+  body[data-modo="xr"] #cabecera h1 { text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7); }
+  body[data-modo="ar"] #cabecera p,
+  body[data-modo="xr"] #cabecera p { color: var(--texto); text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8); }
+</style>
+</head>
+<body data-modo="visor">
+
+<video id="cam" playsinline muted autoplay></video>
+<canvas id="gl"></canvas>
+
+<div id="ui">
+  <div id="gestos"></div>
+
+  <div id="cabecera">
+    <h1>Arduino UNO</h1>
+    <p class="solo-visor">Arrastra para girarla en cualquier dirección. Pellizca para acercar.</p>
+    <p class="solo-ar">Toca la pantalla para poner la placa donde estás mirando. Arrástrala para girarla y pellizca para cambiar su tamaño.</p>
+  </div>
+
+  <button id="restablecer" class="boton secundario solo-visor" type="button">Restablecer</button>
+  <button id="salir" class="boton secundario solo-ar" type="button">Salir de AR</button>
+
+  <div id="aviso" role="status" aria-live="polite" hidden></div>
+
+  <div id="acciones">
+    <button id="btnAR" class="boton principal solo-visor" type="button" disabled>AR con cámara</button>
+    <button id="btnXR" class="boton secundario solo-visor" type="button" hidden>AR con seguimiento de movimiento</button>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+// ---------- Ajustes ----------
+const MODELO = 'arduino_uno.glb';
+const VISOR_FOV = 40;
+const AR_FOV = 63;
+const AR_TAMANO = 0.40;     // metros (lado más largo de la placa)
+const AR_DISTANCIA = 0.9;   // metros frente a la cámara
+
+// ---------- Elementos ----------
+const $ = (id) => document.getElementById(id);
+const ui = $('ui');
+const gestos = $('gestos');
+const video = $('cam');
+const canvas = $('gl');
+const aviso = $('aviso');
+const btnAR = $('btnAR');
+const btnXR = $('btnXR');
+
+// ---------- Escena ----------
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setClearColor(0x000000, 0);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const sol = new THREE.DirectionalLight(0xffffff, 1.2);
+sol.position.set(1, 2, 3);
+scene.add(sol);
+scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+
+const camera = new THREE.PerspectiveCamera(VISOR_FOV, window.innerWidth / window.innerHeight, 0.01, 50);
+scene.add(camera);
+
+// rig = posición y tamaño en el mundo, pivot = giro que hace la persona
+const rig = new THREE.Group();
+const pivot = new THREE.Group();
+rig.add(pivot);
+scene.add(rig);
+
+// ---------- Estado ----------
+let modo = 'visor';          // 'visor' | 'ar' | 'xr'
+let distVisor = 2;
+let zoomVisor = 1;
+let arEscala = 1;
+let colocado = false;
+let framesXR = 0;
+let flujo = null;
+let timerGiro = null;
+let timerAviso = null;
+const objetivo = new THREE.Quaternion();
+
+// ---------- Utilidades ----------
+function mostrarAviso(texto, esError = false, ms = 0) {
+  clearTimeout(timerAviso);
+  aviso.textContent = texto;
+  aviso.classList.toggle('error', esError);
+  aviso.hidden = false;
+  if (ms > 0) timerAviso = setTimeout(() => { aviso.hidden = true; }, ms);
+}
+
+function ocultarAviso() {
+  clearTimeout(timerAviso);
+  aviso.hidden = true;
+}
+
+function vistaInicial() {
+  const horizontal = new THREE.Vector3(1, 0, 0);
+  const frente = new THREE.Vector3(0, 0, 1);
+  const inclinar = new THREE.Quaternion().setFromAxisAngle(horizontal, 0.9);
+  const vertical = window.innerHeight > window.innerWidth;
+  const rolar = new THREE.Quaternion().setFromAxisAngle(frente, vertical ? Math.PI / 2 : 0);
+  return inclinar.multiply(rolar);
+}
+
+function calcularDistanciaVisor() {
+  const aspecto = window.innerWidth / window.innerHeight;
+  const mitad = Math.tan(THREE.MathUtils.degToRad(VISOR_FOV / 2));
+  const necesitaAlto = 1.3;
+  const necesitaAncho = aspecto < 1 ? 0.85 : 1.3;
+  distVisor = Math.max(necesitaAlto / (2 * mitad), necesitaAncho / (2 * mitad * aspecto));
+}
+
+function redimensionar() {
+  if (renderer.xr.isPresenting) return;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  calcularDistanciaVisor();
+}
+window.addEventListener('resize', redimensionar);
+redimensionar();
+
+// ---------- Cargar modelo ----------
+mostrarAviso('Cargando el modelo…');
+new GLTFLoader().load(
+  MODELO,
+  (gltf) => {
+    const modelo = gltf.scene;
+    const caja = new THREE.Box3().setFromObject(modelo);
+    const centro = caja.getCenter(new THREE.Vector3());
+    const tam = caja.getSize(new THREE.Vector3());
+    modelo.position.sub(centro);
+
+    const soporte = new THREE.Group();
+    soporte.add(modelo);
+    soporte.scale.setScalar(1 / Math.max(tam.x, tam.y, tam.z));
+    pivot.add(soporte);
+
+    pivot.quaternion.copy(vistaInicial());
+    btnAR.disabled = false;
+    ocultarAviso();
+  },
+  undefined,
+  () => {
+    mostrarAviso('No se pudo cargar ' + MODELO + '. Revisa que esté en la misma carpeta que index.html.', true);
+  }
+);
+
+// ---------- Giro y zoom con el dedo ----------
+const punteros = new Map();
+let distPrevia = 0;
+const eje = new THREE.Vector3();
+const giro = new THREE.Quaternion();
+const inversa = new THREE.Quaternion();
+
+function distanciaDedos() {
+  const [a, b] = [...punteros.values()];
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function rotar(dx, dy) {
+  rig.getWorldQuaternion(inversa).invert();
+  const k = 0.008;
+
+  eje.set(0, 1, 0).applyQuaternion(camera.quaternion).applyQuaternion(inversa).normalize();
+  giro.setFromAxisAngle(eje, dx * k);
+  pivot.quaternion.premultiply(giro);
+
+  eje.set(1, 0, 0).applyQuaternion(camera.quaternion).applyQuaternion(inversa).normalize();
+  giro.setFromAxisAngle(eje, dy * k);
+  pivot.quaternion.premultiply(giro);
+}
+
+function acercar(razon) {
+  if (modo === 'visor') {
+    zoomVisor = THREE.MathUtils.clamp(zoomVisor / razon, 0.35, 4);
+  } else {
+    arEscala = THREE.MathUtils.clamp(arEscala * razon, 0.25, 6);
+    rig.scale.setScalar(AR_TAMANO * arEscala);
+  }
+}
+
+let toque = null;
+
+gestos.addEventListener('pointerdown', (e) => {
+  gestos.setPointerCapture(e.pointerId);
+  punteros.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (punteros.size === 1) {
+    toque = { x: e.clientX, y: e.clientY, t: performance.now(), valido: true };
+  } else if (toque) {
+    toque.valido = false;
+  }
+  if (punteros.size === 2) distPrevia = distanciaDedos();
+});
+
+gestos.addEventListener('pointermove', (e) => {
+  const p = punteros.get(e.pointerId);
+  if (!p) return;
+  if (toque && toque.valido && Math.hypot(e.clientX - toque.x, e.clientY - toque.y) > 12) {
+    toque.valido = false;
+  }
+  const dx = e.clientX - p.x;
+  const dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+
+  if (punteros.size === 1) {
+    rotar(dx, dy);
+  } else if (punteros.size === 2) {
+    const nueva = distanciaDedos();
+    if (distPrevia > 0) acercar(nueva / distPrevia);
+    distPrevia = nueva;
+  }
+});
+
+const soltar = (e) => {
+  const eraUno = punteros.size === 1;
+  punteros.delete(e.pointerId);
+  if (punteros.size === 2) distPrevia = distanciaDedos();
+  if (e.type === 'pointerup' && eraUno && toque && toque.valido && performance.now() - toque.t < 400) {
+    recolocar();
+  }
+  if (punteros.size === 0) toque = null;
+};
+gestos.addEventListener('pointerup', soltar);
+gestos.addEventListener('pointercancel', soltar);
+
+gestos.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  acercar(e.deltaY < 0 ? 1.08 : 0.92);
+}, { passive: false });
+
+ui.addEventListener('beforexrselect', (e) => e.preventDefault());
+
+// ---------- Poner la placa frente a la cámara ----------
+function colocarFrente(posCamara, quatCamara, reiniciarGiro = true) {
+  rig.quaternion.copy(quatCamara);
+  rig.position.set(0, 0, -AR_DISTANCIA).applyQuaternion(quatCamara).add(posCamara);
+  rig.scale.setScalar(AR_TAMANO * arEscala);
+  if (reiniciarGiro || !colocado) pivot.quaternion.copy(vistaInicial());
+  rig.visible = true;
+  colocado = true;
+  mostrarAviso('Listo. Toca la pantalla para ponerla donde mires.', false, 4000);
+}
+
+function recolocar() {
+  if (modo === 'ar') {
+    colocarFrente(new THREE.Vector3(0, 0, 0), camera.quaternion.clone(), false);
+  } else if (modo === 'xr') {
+    camera.updateMatrixWorld(true);
+    camera.matrixWorld.decompose(posTmp, quatTmp, escTmp);
+    colocarFrente(posTmp, quatTmp, false);
+  }
+}
+
+// ---------- AR con cámara + giroscopio ----------
+const zee = new THREE.Vector3(0, 0, 1);
+const euler = new THREE.Euler();
+const q0 = new THREE.Quaternion();
+const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+
+function anguloPantalla() {
+  if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+  return window.orientation || 0;
+}
+
+function cuaternionDesdeGiroscopio(q, alfa, beta, gamma, orient) {
+  euler.set(beta, alfa, -gamma, 'YXZ');
+  q.setFromEuler(euler);
+  q.multiply(q1);
+  q.multiply(q0.setFromAxisAngle(zee, -orient));
+}
+
+function alOrientar(e) {
+  if (e.alpha === null || e.beta === null || e.gamma === null) return;
+  clearTimeout(timerGiro);
+  const rad = THREE.MathUtils.degToRad;
+  cuaternionDesdeGiroscopio(objetivo, rad(e.alpha), rad(e.beta), rad(e.gamma), rad(anguloPantalla()));
+  if (!colocado) {
+    camera.quaternion.copy(objetivo);
+    colocarFrente(new THREE.Vector3(0, 0, 0), objetivo);
+  }
+}
+
+function textoError(err) {
+  if (!navigator.mediaDevices) return 'Abre la página con https para poder usar la cámara.';
+  const nombre = err && err.name ? ' (' + err.name + ')' : '';
+  if (err && err.message === 'giro-denegado') return 'Necesito permiso de movimiento para seguir el celular.';
+  if (err && err.name === 'NotAllowedError') return 'La cámara está bloqueada. Dale permiso en el candado de la barra de direcciones.';
+  if (err && err.name === 'NotFoundError') return 'No se encontró ninguna cámara.';
+  if (err && (err.name === 'NotReadableError' || err.name === 'AbortError')) {
+    return 'La cámara está ocupada por otra app. Cierra las que la usen, recarga la página e intenta otra vez.' + nombre;
+  }
+  return 'No se pudo abrir la cámara. Recarga la página e intenta otra vez.' + nombre;
+}
+
+async function abrirCamara() {
+  const intentos = [
+    { video: { facingMode: { ideal: 'environment' } }, audio: false },
+    { video: true, audio: false }
+  ];
+  let ultimo;
+  for (const pedido of intentos) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(pedido);
+    } catch (err) {
+      ultimo = err;
+      if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) break;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  }
+  throw ultimo;
+}
+
+function detenerCamara() {
+  if (flujo) {
+    flujo.getTracks().forEach((t) => t.stop());
+    flujo = null;
+  }
+  video.srcObject = null;
+}
+
+async function iniciarAR() {
+  if (modo !== 'visor') return;
+  mostrarAviso('Abriendo la cámara…');
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r !== 'granted') throw new Error('giro-denegado');
+    }
+    flujo = await abrirCamara();
+    video.srcObject = flujo;
+    try { await video.play(); } catch (e) { /* el video arranca solo (autoplay) */ }
+  } catch (err) {
+    detenerCamara();
+    mostrarAviso(textoError(err), true);
+    return;
+  }
+
+  modo = 'ar';
+  document.body.dataset.modo = 'ar';
+  colocado = false;
+  arEscala = 1;
+  camera.fov = AR_FOV;
+  camera.position.set(0, 0, 0);
+  camera.quaternion.identity();
+  camera.updateProjectionMatrix();
+  rig.visible = false;
+  mostrarAviso('Apunta hacia donde quieres la placa…');
+
+  window.addEventListener('deviceorientation', alOrientar);
+  timerGiro = setTimeout(() => {
+    if (!colocado) {
+      camera.quaternion.identity();
+      objetivo.identity();
+      colocarFrente(new THREE.Vector3(0, 0, 0), objetivo);
+      mostrarAviso('Este equipo no entrega datos de giroscopio: la placa queda fija en pantalla, pero puedes girarla con el dedo.', true, 6000);
+    }
+  }, 2500);
+}
+
+// ---------- AR con seguimiento (WebXR), opcional ----------
+async function iniciarXR() {
+  if (modo !== 'visor') return;
+  try {
+    const sesion = await navigator.xr.requestSession('immersive-ar', {
+      optionalFeatures: ['dom-overlay'],
+      domOverlay: { root: ui }
+    });
+    renderer.xr.enabled = true;
+    renderer.xr.setReferenceSpaceType('local');
+    await renderer.xr.setSession(sesion);
+    sesion.addEventListener('end', volverAlVisor);
+
+    modo = 'xr';
+    document.body.dataset.modo = 'xr';
+    colocado = false;
+    framesXR = 0;
+    arEscala = 1;
+    rig.visible = false;
+    ocultarAviso();
+  } catch (err) {
+    renderer.xr.enabled = false;
+    mostrarAviso('No se pudo iniciar este modo. Prueba con "AR con cámara".', true, 5000);
+  }
+}
+
+const permitirXR = new URLSearchParams(window.location.search).has('xr');
+if (permitirXR && navigator.xr && navigator.xr.isSessionSupported) {
+  navigator.xr.isSessionSupported('immersive-ar')
+    .then((ok) => { if (ok) btnXR.hidden = false; })
+    .catch(() => {});
+}
+
+// ---------- Volver al visor 3D ----------
+function volverAlVisor() {
+  clearTimeout(timerGiro);
+  window.removeEventListener('deviceorientation', alOrientar);
+  detenerCamara();
+  renderer.xr.enabled = false;
+
+  modo = 'visor';
+  document.body.dataset.modo = 'visor';
+  colocado = false;
+  zoomVisor = 1;
+
+  camera.fov = VISOR_FOV;
+  camera.quaternion.identity();
+  camera.position.set(0, 0, 0);
+  rig.position.set(0, 0, 0);
+  rig.quaternion.identity();
+  rig.scale.setScalar(1);
+  rig.visible = true;
+  pivot.quaternion.copy(vistaInicial());
+
+  redimensionar();
+  ocultarAviso();
+}
+
+function salir() {
+  const sesion = renderer.xr.getSession && renderer.xr.getSession();
+  if (modo === 'xr' && sesion) {
+    sesion.end();
+  } else {
+    volverAlVisor();
+  }
+}
+
+function restablecer() {
+  pivot.quaternion.copy(vistaInicial());
+  zoomVisor = 1;
+}
+
+btnAR.addEventListener('click', iniciarAR);
+btnXR.addEventListener('click', iniciarXR);
+$('salir').addEventListener('click', salir);
+$('restablecer').addEventListener('click', restablecer);
+
+// ---------- Bucle ----------
+const posTmp = new THREE.Vector3();
+const quatTmp = new THREE.Quaternion();
+const escTmp = new THREE.Vector3();
+
+renderer.setAnimationLoop(() => {
+  if (modo === 'visor') {
+    camera.position.set(0, 0, distVisor * zoomVisor);
+  } else if (modo === 'ar') {
+    if (colocado) camera.quaternion.slerp(objetivo, 0.4);
+  } else if (modo === 'xr') {
+    framesXR++;
+    if (!colocado && framesXR >= 3) {
+      camera.updateMatrixWorld(true);
+      camera.matrixWorld.decompose(posTmp, quatTmp, escTmp);
+      colocarFrente(posTmp, quatTmp);
+    }
+  }
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
