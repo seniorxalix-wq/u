@@ -1,0 +1,1200 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a2a73">
+<title>Componentes electrónicos en 3D y AR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* Colores de fondo: cambian según la escena (ver body[data-escena]) */
+    --fondo-1: #1d63d6;
+    --fondo-2: #0b2f7d;
+    --fondo-3: #061a48;
+    --trazo: #8fd4ff;
+    --texto: #e9f3f1;
+    --texto-suave: #a9c4e8;
+    --oro: #fac31a;
+    --oro-texto: #1a1403;
+    --vidrio: rgba(4, 18, 52, 0.58);
+    --borde: rgba(233, 243, 241, 0.28);
+  }
+
+  body[data-escena="placa"] {
+    --fondo-1: #0f4a4d;
+    --fondo-2: #062a2d;
+    --fondo-3: #03171a;
+    --trazo: #7fe0d2;
+    --texto-suave: #9fc2bd;
+    --oro: #e9b949;
+    --vidrio: rgba(3, 23, 26, 0.55);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  body {
+    font-family: "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--texto);
+    background: radial-gradient(120% 90% at 50% 35%, var(--fondo-1) 0%, var(--fondo-2) 55%, var(--fondo-3) 100%);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  [hidden] { display: none !important; }
+
+  /* ---------- Fondo animado (solo en el visor 3D; en AR se ve la cámara) ---------- */
+  #fondo {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  /* Circuito impreso: se repite y se desplaza despacio */
+  #fondo::before {
+    content: "";
+    position: absolute;
+    inset: -200px;
+    opacity: 0.16;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200' fill='none' stroke='%23ffffff' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M0 40h50l20 20h40'/%3E%3Ccircle cx='116' cy='60' r='4.5'/%3E%3Cpath d='M200 40h-14'/%3E%3Cpath d='M0 120h14'/%3E%3Cpath d='M200 120h-44l-24 24v56'/%3E%3Ccircle cx='132' cy='148' r='4.5'/%3E%3Cpath d='M132 0v26l14 14h40'/%3E%3Ccircle cx='190' cy='40' r='0.1'/%3E%3Cpath d='M14 120h40l16 16'/%3E%3Ccircle cx='76' cy='142' r='4.5'/%3E%3Crect x='40' y='160' width='26' height='14' rx='2'/%3E%3Cpath d='M40 167h-12M66 167h12'/%3E%3C/svg%3E");
+    background-size: 200px 200px;
+    animation: deriva 70s linear infinite;
+  }
+
+  /* Brillo suave en el centro, detrás del modelo */
+  #fondo::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(55% 40% at 50% 42%, color-mix(in srgb, var(--trazo) 28%, transparent) 0%, transparent 70%),
+      radial-gradient(90% 60% at 50% 110%, rgba(0, 0, 0, 0.45) 0%, transparent 70%);
+    animation: respira 7s ease-in-out infinite;
+  }
+
+  @keyframes deriva {
+    from { transform: translate(0, 0); }
+    to   { transform: translate(200px, 200px); }
+  }
+
+  @keyframes respira {
+    0%, 100% { opacity: 0.75; }
+    50%      { opacity: 1; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #fondo::before, #fondo::after { animation: none; }
+  }
+
+  body[data-modo="ar"] #fondo,
+  body[data-modo="xr"] #fondo { display: none; }
+
+  /* ---------- Capas ---------- */
+  #cam {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: none;
+    z-index: 0;
+  }
+
+  #gl {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    z-index: 1;
+  }
+
+  #ui {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  }
+
+  #gestos {
+    position: absolute;
+    inset: 0;
+    pointer-events: auto;
+    touch-action: none;
+  }
+
+  #cabecera {
+    position: absolute;
+    top: 18px;
+    left: 20px;
+    right: 150px;
+    pointer-events: none;
+  }
+
+  #cabecera h1 {
+    margin: 0 0 6px;
+    font-size: 1.45rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  #cabecera p {
+    margin: 0;
+    max-width: 30ch;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    color: var(--texto-suave);
+  }
+
+  .boton {
+    pointer-events: auto;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    border-radius: 999px;
+    padding: 14px 26px;
+    font-size: 1rem;
+    border: 1px solid transparent;
+    touch-action: manipulation;
+  }
+
+  .boton:focus-visible {
+    outline: 3px solid var(--texto);
+    outline-offset: 3px;
+  }
+
+  .boton:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .principal {
+    background: var(--oro);
+    color: var(--oro-texto);
+    padding: 16px 34px;
+    font-size: 1.05rem;
+  }
+
+  .secundario {
+    background: var(--vidrio);
+    color: var(--texto);
+    border-color: var(--borde);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    padding: 11px 20px;
+    font-size: 0.9rem;
+  }
+
+  #restablecer {
+    position: absolute;
+    top: 18px;
+    right: 20px;
+  }
+
+  #salir {
+    position: absolute;
+    top: 18px;
+    right: 20px;
+  }
+
+  #acciones {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 26px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    pointer-events: none;
+  }
+
+  #aviso {
+    position: absolute;
+    left: 50%;
+    bottom: 150px;
+    transform: translateX(-50%);
+    max-width: min(88vw, 34ch);
+    padding: 12px 18px;
+    border-radius: 14px;
+    background: var(--vidrio);
+    border: 1px solid var(--borde);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    font-size: 0.92rem;
+    line-height: 1.4;
+    text-align: center;
+    pointer-events: none;
+  }
+
+  #aviso.error {
+    border-color: var(--oro);
+  }
+
+  /* ---------- Panel de información (botón "i") ---------- */
+  #panelInfo {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(90vw, 380px);
+    max-height: 78vh;
+    overflow-y: auto;
+    padding: 22px 22px 18px;
+    border-radius: 22px;
+    background: rgba(4, 18, 52, 0.88);
+    border: 1px solid var(--borde);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+    pointer-events: auto;
+  }
+
+  body[data-escena="placa"] #panelInfo { background: rgba(3, 23, 26, 0.9); }
+
+  #panelInfo h2 {
+    margin: 0 0 10px;
+    font-size: 1.2rem;
+    font-weight: 800;
+  }
+
+  #panelInfo ul {
+    margin: 0 0 16px;
+    padding-left: 1.1em;
+    font-size: 0.93rem;
+    line-height: 1.5;
+    color: var(--texto);
+  }
+
+  #panelInfo li { margin-bottom: 6px; }
+  #panelInfo li b { color: var(--oro); }
+
+  #panelInfo .boton { display: block; margin: 0 auto; }
+
+  /* ---------- Qué se muestra en cada modo / escena ---------- */
+  body[data-modo="visor"] .solo-ar { display: none; }
+  body[data-modo="ar"] .solo-visor,
+  body[data-modo="xr"] .solo-visor { display: none; }
+  body[data-escena="portada"] .solo-placa { display: none; }
+  body[data-modo="ar"] #cam { display: block; }
+  body[data-modo="ar"],
+  body[data-modo="xr"] { background: transparent; }
+  body[data-modo="ar"] #cabecera h1,
+  body[data-modo="xr"] #cabecera h1 { text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7); }
+  body[data-modo="ar"] #cabecera p,
+  body[data-modo="xr"] #cabecera p { color: var(--texto); text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8); }
+</style>
+</head>
+<body data-modo="visor" data-escena="portada">
+
+<div id="fondo" aria-hidden="true"></div>
+<video id="cam" playsinline muted autoplay></video>
+<canvas id="gl"></canvas>
+
+<div id="ui">
+  <div id="gestos"></div>
+
+  <div id="cabecera">
+    <h1 id="titulo" hidden></h1>
+    <p id="ayudaVisor" class="solo-visor"></p>
+    <p id="ayudaAR" class="solo-ar"></p>
+  </div>
+
+  <button id="restablecer" class="boton secundario solo-visor" type="button">Restablecer</button>
+  <button id="salir" class="boton secundario solo-ar" type="button">Salir de AR</button>
+
+  <div id="aviso" role="status" aria-live="polite" hidden></div>
+
+  <div id="panelInfo" role="dialog" aria-modal="true" aria-labelledby="panelTitulo" hidden>
+    <h2 id="panelTitulo"></h2>
+    <ul id="panelLista"></ul>
+    <button id="panelCerrar" class="boton principal" type="button">Entendido</button>
+  </div>
+
+  <div id="acciones">
+    <button id="btnAR" class="boton principal solo-visor" type="button" disabled>AR con cámara</button>
+    <button id="btnXR" class="boton secundario solo-visor" type="button" hidden>AR con seguimiento de movimiento</button>
+    <button id="btnPortada" class="boton secundario solo-placa" type="button">← Volver a la portada</button>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
+
+// =====================================================================
+//  AJUSTES  (aquí se cambia lo que más vas a tocar)
+// =====================================================================
+
+// Archivos de modelos: deben estar en la MISMA carpeta que index.html
+const MODELOS = {
+  placa:  'arduino_uno.glb',
+  banner: 'banner_componentes_electronicos.glb',
+  inicio: 'boton_inicio.glb',
+  info:   'boton_info.glb'
+};
+
+const VISOR_FOV = 40;
+const AR_FOV = 63;
+const AR_DISTANCIA = 0.9;   // metros frente a la cámara
+
+// Cada escena = una "pantalla". Para agregar otra, se agrega aquí y se arma en construir().
+//   arTamano : metros que mide la escena en AR (lado de referencia = 1 unidad)
+//   encuadre : cuánto espacio necesita en pantalla (alto, ancho en vertical, ancho en horizontal)
+//   vista    : giro inicial de la escena
+//   info     : contenido del panel que abre el botón "i"
+const ESCENAS = {
+  portada: {
+    titulo: '',
+    ayudaVisor: 'Arrastra para girar la escena. Toca Inicio para empezar.',
+    ayudaAR: 'Toca la pantalla para poner la portada donde estás mirando. Arrástrala para girarla y pellizca para cambiar su tamaño.',
+    arTamano: 0.40,
+    encuadre: { alto: 1.35, ancho: 1.2, anchoH: 1.6 },
+    vista: () => new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.22),
+    info: {
+      titulo: '¿Cómo se usa?',
+      items: [
+        '<b>Girar:</b> arrastra con un dedo.',
+        '<b>Zoom:</b> pellizca con dos dedos.',
+        '<b>Inicio:</b> toca el botón azul para conocer la placa Arduino UNO.',
+        '<b>AR con cámara:</b> abre la cámara y toca la pantalla donde quieras que aparezca todo.'
+      ]
+    }
+  },
+  placa: {
+    titulo: 'Arduino UNO',
+    ayudaVisor: 'Arrastra para girarla en cualquier dirección. Pellizca para acercar.',
+    ayudaAR: 'Toca la pantalla para poner la placa donde estás mirando. Arrástrala para girarla y pellizca para cambiar su tamaño.',
+    arTamano: 0.40,
+    encuadre: { alto: 1.45, ancho: 0.95, anchoH: 1.45 },
+    vista: () => {
+      const horizontal = new THREE.Vector3(1, 0, 0);
+      const frente = new THREE.Vector3(0, 0, 1);
+      const inclinar = new THREE.Quaternion().setFromAxisAngle(horizontal, 0.9);
+      const vertical = window.innerHeight > window.innerWidth;
+      const rolar = new THREE.Quaternion().setFromAxisAngle(frente, vertical ? Math.PI / 2 : 0);
+      // Primero se inclina y después se gira sobre la pantalla (en la beta era al revés y en vertical se veía de canto)
+      return rolar.multiply(inclinar);
+    },
+    info: {
+      titulo: 'Partes de la Arduino UNO',
+      items: [
+        '<b>ATmega328P:</b> el microcontrolador, el cerebro de la placa.',
+        '<b>Puerto USB:</b> la conecta al computador para programarla y alimentarla.',
+        '<b>Jack DC:</b> entrada de alimentación externa (se recomiendan 7–12 V).',
+        '<b>Cabezales:</b> pines digitales (0–13), analógicos (A0–A5) y de alimentación.',
+        '<b>Botón reset:</b> reinicia el programa.',
+        '<b>Cristal:</b> el reloj de 16 MHz del microcontrolador.',
+        '<b>ICSP:</b> pines para programar el chip directamente.',
+        '<b>LEDs:</b> encendido (ON), pin 13 (L) y comunicación (TX/RX).'
+      ]
+    }
+  }
+};
+
+// =====================================================================
+//  Elementos
+// =====================================================================
+const $ = (id) => document.getElementById(id);
+const ui = $('ui');
+const gestos = $('gestos');
+const video = $('cam');
+const canvas = $('gl');
+const aviso = $('aviso');
+const btnAR = $('btnAR');
+const btnXR = $('btnXR');
+const panelInfo = $('panelInfo');
+
+// =====================================================================
+//  Escena
+// =====================================================================
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setClearColor(0x000000, 0);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const sol = new THREE.DirectionalLight(0xffffff, 1.2);
+sol.position.set(1, 2, 3);
+scene.add(sol);
+scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+
+const camera = new THREE.PerspectiveCamera(VISOR_FOV, window.innerWidth / window.innerHeight, 0.01, 50);
+scene.add(camera);
+
+// rig = posición y tamaño en el mundo, pivot = giro que hace la persona
+const rig = new THREE.Group();
+const pivot = new THREE.Group();
+rig.add(pivot);
+scene.add(rig);
+
+// =====================================================================
+//  Estado
+// =====================================================================
+let modo = 'visor';          // 'visor' | 'ar' | 'xr'
+let escenaActual = 'portada';
+let distVisor = 2;
+let zoomVisor = 1;
+let arEscala = 1;
+let colocado = false;
+let framesXR = 0;
+let flujo = null;
+let timerGiro = null;
+let timerAviso = null;
+let tAparicion = 0;          // instante en que apareció la escena actual
+let presion = null;          // botón 3D que se está pulsando
+const objetivo = new THREE.Quaternion();
+const mundo = {};            // nombre de escena -> { soporte, botones, flotantes }
+
+// =====================================================================
+//  Utilidades
+// =====================================================================
+function mostrarAviso(texto, esError = false, ms = 0) {
+  clearTimeout(timerAviso);
+  aviso.textContent = texto;
+  aviso.classList.toggle('error', esError);
+  aviso.hidden = false;
+  if (ms > 0) timerAviso = setTimeout(() => { aviso.hidden = true; }, ms);
+}
+
+function ocultarAviso() {
+  clearTimeout(timerAviso);
+  aviso.hidden = true;
+}
+
+const vistaInicial = () => ESCENAS[escenaActual].vista();
+const tamanoAR = () => ESCENAS[escenaActual].arTamano * arEscala;
+
+function calcularDistanciaVisor() {
+  const enc = ESCENAS[escenaActual].encuadre;
+  const aspecto = window.innerWidth / window.innerHeight;
+  const mitad = Math.tan(THREE.MathUtils.degToRad(VISOR_FOV / 2));
+  const necesitaAlto = enc.alto;
+  const necesitaAncho = aspecto < 1 ? enc.ancho : enc.anchoH;
+  distVisor = Math.max(necesitaAlto / (2 * mitad), necesitaAncho / (2 * mitad * aspecto));
+}
+
+function redimensionar() {
+  if (renderer.xr.isPresenting) return;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  calcularDistanciaVisor();
+  orientarInfoPlaca();
+}
+window.addEventListener('resize', redimensionar);
+redimensionar();
+
+// =====================================================================
+//  Cargar y armar los modelos
+// =====================================================================
+const cargador = new GLTFLoader();
+
+function cargar(archivo) {
+  return new Promise((resolver, rechazar) => {
+    cargador.load(archivo, resolver, undefined, () => rechazar(archivo));
+  });
+}
+
+// Los modelos nuevos vienen sin normales: se calculan con aristas marcadas para que se vean suaves
+function suavizar(objeto) {
+  const sinLuz = new Map();   // material con textura -> versión sin iluminación
+  objeto.traverse((m) => {
+    if (!m.isMesh) return;
+    if (m.material.map) {
+      // Las texturas (letras, iconos) ya traen su propio brillo: se muestran tal cual, sin que la luz las lave
+      if (!sinLuz.has(m.material)) {
+        sinLuz.set(m.material, new THREE.MeshBasicMaterial({
+          map: m.material.map, alphaTest: 0.5, side: THREE.DoubleSide, toneMapped: false
+        }));
+      }
+      m.material = sinLuz.get(m.material);
+    } else if (!m.geometry.attributes.normal) {
+      m.geometry = toCreasedNormals(m.geometry, 0.7);
+      m.material.flatShading = false;
+      m.material.needsUpdate = true;
+    }
+  });
+}
+
+function marcarBoton(grupo, accion, escalaBase, rotX = 0) {
+  grupo.userData.accion = accion;
+  grupo.userData.escalaBase = escalaBase;
+  grupo.scale.setScalar(escalaBase);
+  grupo.rotation.x = rotX;
+}
+
+// ---------- Decoración flotante de la portada (se genera por código) ----------
+const mat = (color, rugosidad = 0.5, metal = 0, emision = 0) =>
+  new THREE.MeshStandardMaterial({ color, roughness: rugosidad, metalness: metal, emissive: emision ? color : 0x000000, emissiveIntensity: emision });
+
+function crearChip() {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.012, 0.07), mat(0x1b1f2a, 0.45)));
+  const pata = new THREE.BoxGeometry(0.014, 0.004, 0.007);
+  const metal = mat(0xc8ccd4, 0.3, 0.9);
+  for (let i = 0; i < 5; i++) {
+    for (const lado of [-1, 1]) {
+      const p = new THREE.Mesh(pata, metal);
+      p.position.set(lado * 0.04, -0.002, -0.028 + i * 0.014);
+      g.add(p);
+    }
+  }
+  const punto = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.002, 12), mat(0xdfe6f2, 0.5));
+  punto.position.set(-0.024, 0.007, -0.024);
+  g.add(punto);
+  return g;
+}
+
+function crearResistencia() {
+  const g = new THREE.Group();
+  const cuerpo = new THREE.Mesh(new THREE.CapsuleGeometry(0.011, 0.04, 4, 12), mat(0xd9b98a, 0.55));
+  cuerpo.rotation.z = Math.PI / 2;
+  g.add(cuerpo);
+  const bandas = [[-0.02, 0xd32f2f], [-0.009, 0x7b1fa2], [0.003, 0xff9800], [0.02, 0xd4af37]];
+  for (const [x, color] of bandas) {
+    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.0118, 0.0118, 0.004, 14), mat(color, 0.4));
+    b.rotation.z = Math.PI / 2;
+    b.position.x = x;
+    g.add(b);
+  }
+  const alambre = new THREE.CylinderGeometry(0.0015, 0.0015, 0.04, 8);
+  const plata = mat(0xc8ccd4, 0.3, 0.9);
+  for (const lado of [-1, 1]) {
+    const a = new THREE.Mesh(alambre, plata);
+    a.rotation.z = Math.PI / 2;
+    a.position.x = lado * 0.057;
+    g.add(a);
+  }
+  return g;
+}
+
+function crearCapacitor() {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.017, 0.04, 20), mat(0x1b3a8f, 0.4)));
+  const tapa = new THREE.Mesh(new THREE.CylinderGeometry(0.0172, 0.0172, 0.002, 20), mat(0xc8ccd4, 0.3, 0.9));
+  tapa.position.y = 0.021;
+  g.add(tapa);
+  const franja = new THREE.Mesh(new THREE.CylinderGeometry(0.0173, 0.0173, 0.034, 20, 1, false, 0, 0.9), mat(0xe9eef8, 0.5));
+  g.add(franja);
+  const alambre = new THREE.CylinderGeometry(0.0015, 0.0015, 0.03, 8);
+  for (const lado of [-1, 1]) {
+    const a = new THREE.Mesh(alambre, mat(0xc8ccd4, 0.3, 0.9));
+    a.position.set(lado * 0.007, -0.034, 0);
+    g.add(a);
+  }
+  return g;
+}
+
+function crearLED(color) {
+  const g = new THREE.Group();
+  const resina = mat(color, 0.2, 0, 0.55);
+  const cuerpo = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.018, 20), resina);
+  g.add(cuerpo);
+  const domo = new THREE.Mesh(new THREE.SphereGeometry(0.014, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), resina);
+  domo.position.y = 0.009;
+  g.add(domo);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.0165, 0.0165, 0.004, 20), resina);
+  base.position.y = -0.009;
+  g.add(base);
+  const alambre = new THREE.CylinderGeometry(0.0013, 0.0013, 0.03, 8);
+  for (const lado of [-1, 1]) {
+    const a = new THREE.Mesh(alambre, mat(0xc8ccd4, 0.3, 0.9));
+    a.position.set(lado * 0.0045, -0.026, 0);
+    g.add(a);
+  }
+  return g;
+}
+
+function crearDecoracion() {
+  const grupo = new THREE.Group();
+  const piezas = [
+    [crearChip(),              -0.19, 0.52, 0.00, 0.9,  0.5],
+    [crearResistencia(),        0.03, 0.60, 0.00, 1.1, -0.6],
+    [crearCapacitor(),          0.22, 0.50, 0.00, 0.8,  0.7],
+    [crearLED(0x34c759),       -0.30, 0.40, 0.08, 1.2, -0.5],
+    [crearLED(0xff3b30),        0.31, 0.39, 0.08, 1.0,  0.6],
+    [crearLED(0xffd60a),        0.00, 0.46, 0.07, 1.3,  0.4]
+  ];
+  piezas.forEach(([obj, x, y, z, vel, giro], i) => {
+    obj.position.set(x, y, z);
+    obj.rotation.set(0.5 - i * 0.15, i, 0.25);
+    obj.userData.flota = { y, fase: i * 1.3, vel, giro, amp: 0.012 };
+    grupo.add(obj);
+  });
+  return grupo;
+}
+
+// ---------- Portada: banner + botón Inicio + botón "i" + decoración ----------
+function armarPortada(banner, inicio, info) {
+  const contenido = new THREE.Group();
+  const anchoBanner = new THREE.Box3().setFromObject(banner).getSize(new THREE.Vector3()).x;
+
+  banner.position.y = -0.0205;                  // apoyado sobre el pedestal
+  contenido.add(banner);
+
+  const botones = [];
+  const gInicio = new THREE.Group();
+  gInicio.add(inicio.clone(true));
+  gInicio.position.set(-0.06, 0.037, 0.15);
+  marcarBoton(gInicio, 'inicio', 0.7, -0.55);
+  contenido.add(gInicio);
+  botones.push(gInicio);
+
+  const gInfo = new THREE.Group();
+  gInfo.add(info.clone(true));
+  gInfo.position.set(0.12, 0.037, 0.15);
+  marcarBoton(gInfo, 'info', 0.5, -0.55);
+  contenido.add(gInfo);
+  botones.push(gInfo);
+
+  const decoracion = crearDecoracion();
+  contenido.add(decoracion);
+
+  const centro = new THREE.Box3().setFromObject(contenido).getCenter(new THREE.Vector3());
+  contenido.position.sub(centro);
+
+  const soporte = new THREE.Group();
+  soporte.add(contenido);
+  soporte.userData.escala = 1 / anchoBanner;
+  soporte.scale.setScalar(soporte.userData.escala);
+  return { soporte, botones, flotantes: decoracion.children };
+}
+
+// ---------- Placa Arduino + botón "i" tumbado a su lado ----------
+function armarPlaca(modelo, info) {
+  const caja = new THREE.Box3().setFromObject(modelo);
+  const centro = caja.getCenter(new THREE.Vector3());
+  const tam = caja.getSize(new THREE.Vector3());
+  modelo.position.sub(centro);
+
+  const soporte = new THREE.Group();
+  soporte.add(modelo);
+
+  const gInfo = new THREE.Group();
+  gInfo.add(info.clone(true));
+  marcarBoton(gInfo, 'info', 0.5, -Math.PI / 2);   // acostado, mirando hacia arriba
+  gInfo.rotation.order = 'YXZ';
+  soporte.add(gInfo);
+
+  soporte.userData.escala = 1 / Math.max(tam.x, tam.y, tam.z);
+  soporte.scale.setScalar(soporte.userData.escala);
+  return { soporte, botones: [gInfo], flotantes: [], infoBtn: gInfo, mitadX: tam.x / 2 };
+}
+
+// El botón "i" de la placa se acomoda para que la "i" se lea derecha en vertical y en horizontal
+function orientarInfoPlaca() {
+  const m = mundo.placa;
+  if (!m) return;
+  const vertical = window.innerHeight > window.innerWidth;
+  m.infoBtn.rotation.y = vertical ? -Math.PI / 2 : 0;
+  if (vertical) m.infoBtn.position.set(m.mitadX + 0.028, 0, 0);
+  else m.infoBtn.position.set(m.mitadX + 0.065, 0, 0.05);
+}
+
+function construir(m) {
+  [m.banner, m.inicio, m.info].forEach((g) => suavizar(g.scene));
+
+  mundo.portada = armarPortada(m.banner.scene, m.inicio.scene, m.info.scene);
+  mundo.placa = armarPlaca(m.placa.scene, m.info.scene);
+
+  for (const nombre of Object.keys(mundo)) {
+    mundo[nombre].soporte.visible = nombre === escenaActual;
+    pivot.add(mundo[nombre].soporte);
+  }
+  orientarInfoPlaca();
+  pivot.quaternion.copy(vistaInicial());
+  tAparicion = performance.now();
+  btnAR.disabled = false;
+  ocultarAviso();
+}
+
+mostrarAviso('Cargando los modelos…');
+Promise.all(Object.entries(MODELOS).map(([clave, archivo]) => cargar(archivo).then((g) => [clave, g])))
+  .then((pares) => construir(Object.fromEntries(pares)))
+  .catch((archivo) => {
+    mostrarAviso('No se pudo cargar ' + archivo + '. Revisa que esté en la misma carpeta que index.html.', true);
+  });
+
+// =====================================================================
+//  Cambiar de escena
+// =====================================================================
+function cambiarEscena(nombre) {
+  if (!mundo[nombre] || nombre === escenaActual) return;
+  cerrarInfo();
+  escenaActual = nombre;
+  const cfg = ESCENAS[nombre];
+
+  for (const clave of Object.keys(mundo)) mundo[clave].soporte.visible = clave === nombre;
+
+  document.body.dataset.escena = nombre;
+  $('titulo').textContent = cfg.titulo;
+  $('titulo').hidden = !cfg.titulo;
+  $('ayudaVisor').textContent = cfg.ayudaVisor;
+  $('ayudaAR').textContent = cfg.ayudaAR;
+
+  orientarInfoPlaca();
+  pivot.quaternion.copy(vistaInicial());
+  zoomVisor = 1;
+  presion = null;
+  tAparicion = performance.now();
+
+  if (modo === 'visor') {
+    calcularDistanciaVisor();
+  } else {
+    rig.scale.setScalar(tamanoAR());
+  }
+}
+
+// Pone los textos de la escena inicial
+$('ayudaVisor').textContent = ESCENAS.portada.ayudaVisor;
+$('ayudaAR').textContent = ESCENAS.portada.ayudaAR;
+
+// =====================================================================
+//  Panel de información
+// =====================================================================
+function abrirInfo() {
+  const info = ESCENAS[escenaActual].info;
+  $('panelTitulo').textContent = info.titulo;
+  const lista = $('panelLista');
+  lista.replaceChildren();
+  for (const html of info.items) {
+    const li = document.createElement('li');
+    li.innerHTML = html;       // los textos salen de ESCENAS (los escribes tú)
+    lista.appendChild(li);
+  }
+  panelInfo.hidden = false;
+  $('panelCerrar').focus({ preventScroll: true });
+}
+
+function cerrarInfo() {
+  panelInfo.hidden = true;
+}
+
+$('panelCerrar').addEventListener('click', cerrarInfo);
+
+// =====================================================================
+//  Botones 3D (toque sobre un botón del modelo)
+// =====================================================================
+const rayo = new THREE.Raycaster();
+const punto = new THREE.Vector2();
+
+function botonBajoElDedo(x, y) {
+  const m = mundo[escenaActual];
+  if (!m || !rig.visible) return null;
+  punto.set((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1);
+  camera.updateMatrixWorld(true);
+  rayo.setFromCamera(punto, camera);
+  const golpes = rayo.intersectObjects(m.botones, true);
+  if (!golpes.length) return null;
+  let o = golpes[0].object;
+  while (o && !o.userData.accion) o = o.parent;
+  return o || null;
+}
+
+function pulsar(boton) {
+  presion = { boton, t0: performance.now() };
+  setTimeout(() => {
+    if (boton.userData.accion === 'inicio') cambiarEscena('placa');
+    else if (boton.userData.accion === 'info') abrirInfo();
+  }, 170);
+}
+
+// Un toque corto: si cae sobre un botón 3D lo pulsa; si no, coloca la escena (como antes)
+function tocar(x, y) {
+  const boton = botonBajoElDedo(x, y);
+  if (boton) pulsar(boton);
+  else recolocar();
+}
+
+// =====================================================================
+//  Giro y zoom con el dedo
+// =====================================================================
+const punteros = new Map();
+let distPrevia = 0;
+const eje = new THREE.Vector3();
+const giro = new THREE.Quaternion();
+const inversa = new THREE.Quaternion();
+
+function distanciaDedos() {
+  const [a, b] = [...punteros.values()];
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function rotar(dx, dy) {
+  rig.getWorldQuaternion(inversa).invert();
+  const k = 0.008;
+
+  eje.set(0, 1, 0).applyQuaternion(camera.quaternion).applyQuaternion(inversa).normalize();
+  giro.setFromAxisAngle(eje, dx * k);
+  pivot.quaternion.premultiply(giro);
+
+  eje.set(1, 0, 0).applyQuaternion(camera.quaternion).applyQuaternion(inversa).normalize();
+  giro.setFromAxisAngle(eje, dy * k);
+  pivot.quaternion.premultiply(giro);
+}
+
+function acercar(razon) {
+  if (modo === 'visor') {
+    zoomVisor = THREE.MathUtils.clamp(zoomVisor / razon, 0.35, 4);
+  } else {
+    arEscala = THREE.MathUtils.clamp(arEscala * razon, 0.25, 6);
+    rig.scale.setScalar(tamanoAR());
+  }
+}
+
+let toque = null;
+
+gestos.addEventListener('pointerdown', (e) => {
+  gestos.setPointerCapture(e.pointerId);
+  punteros.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (punteros.size === 1) {
+    toque = { x: e.clientX, y: e.clientY, t: performance.now(), valido: true };
+  } else if (toque) {
+    toque.valido = false;
+  }
+  if (punteros.size === 2) distPrevia = distanciaDedos();
+});
+
+gestos.addEventListener('pointermove', (e) => {
+  const p = punteros.get(e.pointerId);
+  if (!p) return;
+  if (toque && toque.valido && Math.hypot(e.clientX - toque.x, e.clientY - toque.y) > 12) {
+    toque.valido = false;
+  }
+  const dx = e.clientX - p.x;
+  const dy = e.clientY - p.y;
+  p.x = e.clientX;
+  p.y = e.clientY;
+
+  if (punteros.size === 1) {
+    rotar(dx, dy);
+  } else if (punteros.size === 2) {
+    const nueva = distanciaDedos();
+    if (distPrevia > 0) acercar(nueva / distPrevia);
+    distPrevia = nueva;
+  }
+});
+
+const soltar = (e) => {
+  const eraUno = punteros.size === 1;
+  punteros.delete(e.pointerId);
+  if (punteros.size === 2) distPrevia = distanciaDedos();
+  if (e.type === 'pointerup' && eraUno && toque && toque.valido && performance.now() - toque.t < 400) {
+    tocar(e.clientX, e.clientY);
+  }
+  if (punteros.size === 0) toque = null;
+};
+gestos.addEventListener('pointerup', soltar);
+gestos.addEventListener('pointercancel', soltar);
+
+gestos.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  acercar(e.deltaY < 0 ? 1.08 : 0.92);
+}, { passive: false });
+
+ui.addEventListener('beforexrselect', (e) => e.preventDefault());
+
+// =====================================================================
+//  Poner la escena frente a la cámara  (igual que en la beta)
+// =====================================================================
+function colocarFrente(posCamara, quatCamara, reiniciarGiro = true) {
+  rig.quaternion.copy(quatCamara);
+  rig.position.set(0, 0, -AR_DISTANCIA).applyQuaternion(quatCamara).add(posCamara);
+  rig.scale.setScalar(tamanoAR());
+  if (reiniciarGiro || !colocado) pivot.quaternion.copy(vistaInicial());
+  rig.visible = true;
+  colocado = true;
+  mostrarAviso('Listo. Toca la pantalla para ponerla donde mires.', false, 4000);
+}
+
+function recolocar() {
+  if (modo === 'ar') {
+    colocarFrente(new THREE.Vector3(0, 0, 0), camera.quaternion.clone(), false);
+  } else if (modo === 'xr') {
+    camera.updateMatrixWorld(true);
+    camera.matrixWorld.decompose(posTmp, quatTmp, escTmp);
+    colocarFrente(posTmp, quatTmp, false);
+  }
+}
+
+// =====================================================================
+//  AR con cámara + giroscopio  (sin cambios respecto a la beta)
+// =====================================================================
+const zee = new THREE.Vector3(0, 0, 1);
+const euler = new THREE.Euler();
+const q0 = new THREE.Quaternion();
+const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+
+function anguloPantalla() {
+  if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+  return window.orientation || 0;
+}
+
+function cuaternionDesdeGiroscopio(q, alfa, beta, gamma, orient) {
+  euler.set(beta, alfa, -gamma, 'YXZ');
+  q.setFromEuler(euler);
+  q.multiply(q1);
+  q.multiply(q0.setFromAxisAngle(zee, -orient));
+}
+
+function alOrientar(e) {
+  if (e.alpha === null || e.beta === null || e.gamma === null) return;
+  clearTimeout(timerGiro);
+  const rad = THREE.MathUtils.degToRad;
+  cuaternionDesdeGiroscopio(objetivo, rad(e.alpha), rad(e.beta), rad(e.gamma), rad(anguloPantalla()));
+  if (!colocado) {
+    camera.quaternion.copy(objetivo);
+    colocarFrente(new THREE.Vector3(0, 0, 0), objetivo);
+  }
+}
+
+function textoError(err) {
+  if (!navigator.mediaDevices) return 'Abre la página con https para poder usar la cámara.';
+  const nombre = err && err.name ? ' (' + err.name + ')' : '';
+  if (err && err.message === 'giro-denegado') return 'Necesito permiso de movimiento para seguir el celular.';
+  if (err && err.name === 'NotAllowedError') return 'La cámara está bloqueada. Dale permiso en el candado de la barra de direcciones.';
+  if (err && err.name === 'NotFoundError') return 'No se encontró ninguna cámara.';
+  if (err && (err.name === 'NotReadableError' || err.name === 'AbortError')) {
+    return 'La cámara está ocupada por otra app. Cierra las que la usen, recarga la página e intenta otra vez.' + nombre;
+  }
+  return 'No se pudo abrir la cámara. Recarga la página e intenta otra vez.' + nombre;
+}
+
+async function abrirCamara() {
+  const intentos = [
+    { video: { facingMode: { ideal: 'environment' } }, audio: false },
+    { video: true, audio: false }
+  ];
+  let ultimo;
+  for (const pedido of intentos) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(pedido);
+    } catch (err) {
+      ultimo = err;
+      if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) break;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  }
+  throw ultimo;
+}
+
+function detenerCamara() {
+  if (flujo) {
+    flujo.getTracks().forEach((t) => t.stop());
+    flujo = null;
+  }
+  video.srcObject = null;
+}
+
+async function iniciarAR() {
+  if (modo !== 'visor') return;
+  cerrarInfo();
+  mostrarAviso('Abriendo la cámara…');
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r !== 'granted') throw new Error('giro-denegado');
+    }
+    flujo = await abrirCamara();
+    video.srcObject = flujo;
+    try { await video.play(); } catch (e) { /* el video arranca solo (autoplay) */ }
+  } catch (err) {
+    detenerCamara();
+    mostrarAviso(textoError(err), true);
+    return;
+  }
+
+  modo = 'ar';
+  document.body.dataset.modo = 'ar';
+  colocado = false;
+  arEscala = 1;
+  camera.fov = AR_FOV;
+  camera.position.set(0, 0, 0);
+  camera.quaternion.identity();
+  camera.updateProjectionMatrix();
+  rig.visible = false;
+  mostrarAviso('Apunta hacia donde quieres la escena…');
+
+  window.addEventListener('deviceorientation', alOrientar);
+  timerGiro = setTimeout(() => {
+    if (!colocado) {
+      camera.quaternion.identity();
+      objetivo.identity();
+      colocarFrente(new THREE.Vector3(0, 0, 0), objetivo);
+      mostrarAviso('Este equipo no entrega datos de giroscopio: la escena queda fija en pantalla, pero puedes girarla con el dedo.', true, 6000);
+    }
+  }, 2500);
+}
+
+// =====================================================================
+//  AR con seguimiento (WebXR), opcional: solo con ?xr en la dirección
+// =====================================================================
+async function iniciarXR() {
+  if (modo !== 'visor') return;
+  cerrarInfo();
+  try {
+    const sesion = await navigator.xr.requestSession('immersive-ar', {
+      optionalFeatures: ['dom-overlay'],
+      domOverlay: { root: ui }
+    });
+    renderer.xr.enabled = true;
+    renderer.xr.setReferenceSpaceType('local');
+    await renderer.xr.setSession(sesion);
+    sesion.addEventListener('end', volverAlVisor);
+
+    modo = 'xr';
+    document.body.dataset.modo = 'xr';
+    colocado = false;
+    framesXR = 0;
+    arEscala = 1;
+    rig.visible = false;
+    ocultarAviso();
+  } catch (err) {
+    renderer.xr.enabled = false;
+    mostrarAviso('No se pudo iniciar este modo. Prueba con "AR con cámara".', true, 5000);
+  }
+}
+
+const permitirXR = new URLSearchParams(window.location.search).has('xr');
+if (permitirXR && navigator.xr && navigator.xr.isSessionSupported) {
+  navigator.xr.isSessionSupported('immersive-ar')
+    .then((ok) => { if (ok) btnXR.hidden = false; })
+    .catch(() => {});
+}
+
+// =====================================================================
+//  Volver al visor 3D
+// =====================================================================
+function volverAlVisor() {
+  clearTimeout(timerGiro);
+  window.removeEventListener('deviceorientation', alOrientar);
+  detenerCamara();
+  renderer.xr.enabled = false;
+  cerrarInfo();
+
+  modo = 'visor';
+  document.body.dataset.modo = 'visor';
+  colocado = false;
+  zoomVisor = 1;
+
+  camera.fov = VISOR_FOV;
+  camera.quaternion.identity();
+  camera.position.set(0, 0, 0);
+  rig.position.set(0, 0, 0);
+  rig.quaternion.identity();
+  rig.scale.setScalar(1);
+  rig.visible = true;
+  pivot.quaternion.copy(vistaInicial());
+
+  redimensionar();
+  ocultarAviso();
+}
+
+function salir() {
+  const sesion = renderer.xr.getSession && renderer.xr.getSession();
+  if (modo === 'xr' && sesion) {
+    sesion.end();
+  } else {
+    volverAlVisor();
+  }
+}
+
+function restablecer() {
+  pivot.quaternion.copy(vistaInicial());
+  zoomVisor = 1;
+}
+
+btnAR.addEventListener('click', iniciarAR);
+btnXR.addEventListener('click', iniciarXR);
+$('salir').addEventListener('click', salir);
+$('restablecer').addEventListener('click', restablecer);
+$('btnPortada').addEventListener('click', () => cambiarEscena('portada'));
+
+// =====================================================================
+//  Bucle de dibujo
+// =====================================================================
+const posTmp = new THREE.Vector3();
+const quatTmp = new THREE.Quaternion();
+const escTmp = new THREE.Vector3();
+const facil = (t) => 1 + 2.70158 * Math.pow(t - 1, 3) + 1.70158 * Math.pow(t - 1, 2);   // rebote suave
+let tAnterior = performance.now();
+
+function animarEscena(ahora, dt) {
+  const m = mundo[escenaActual];
+  if (!m) return;
+
+  // Aparición al cambiar de escena
+  const t = Math.min((ahora - tAparicion) / 450, 1);
+  m.soporte.scale.setScalar(m.soporte.userData.escala * Math.max(facil(t), 0.001));
+
+  // Piezas flotantes de la portada
+  for (const p of m.flotantes) {
+    const f = p.userData.flota;
+    p.position.y = f.y + Math.sin(ahora / 1000 * f.vel + f.fase) * f.amp;
+    p.rotation.y += f.giro * dt;
+  }
+
+  // Botones 3D: latido suave (invita a tocar) + hundimiento al pulsarlos
+  for (const b of m.botones) {
+    let k = 1 + 0.025 * Math.sin(ahora / 1000 * 2.4 + b.position.x * 10);
+    if (presion && presion.boton === b) {
+      const p = (ahora - presion.t0) / 260;
+      if (p >= 1) presion = null;
+      else k *= 1 - 0.2 * Math.sin(Math.PI * p);
+    }
+    b.scale.setScalar(b.userData.escalaBase * k);
+  }
+}
+
+renderer.setAnimationLoop(() => {
+  const ahora = performance.now();
+  const dt = Math.min((ahora - tAnterior) / 1000, 0.1);
+  tAnterior = ahora;
+
+  if (modo === 'visor') {
+    camera.position.set(0, 0, distVisor * zoomVisor);
+  } else if (modo === 'ar') {
+    if (colocado) camera.quaternion.slerp(objetivo, 0.4);
+  } else if (modo === 'xr') {
+    framesXR++;
+    if (!colocado && framesXR >= 3) {
+      camera.updateMatrixWorld(true);
+      camera.matrixWorld.decompose(posTmp, quatTmp, escTmp);
+      colocarFrente(posTmp, quatTmp);
+    }
+  }
+  animarEscena(ahora, dt);
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
